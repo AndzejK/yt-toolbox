@@ -1,0 +1,18 @@
+# Python/Virtual Environments
+.venv/
+__pycache__/
+*.py[cod]
+
+# Dependencies
+venv/
+env/
+
+# OS Files
+.DS_Store
+
+# Application Specific
+downloads/
+tokens/
+credentials.json
+.streamlit/
+*.log
