@@ -1,12 +1,13 @@
 # YouTube Downloader
 
-A small Streamlit app for downloading YouTube videos or extracting audio as MP3.
+A small Streamlit app for downloading YouTube videos, extracting audio as MP3, or generating transcripts from spoken audio.
 
 ## What It Does
 
 - Paste a YouTube URL into the app
 - Choose a quality option: `best` or `worst`
 - Choose an output format: `mp4`, `mkv`, `webm`, or `mp3`
+- Optionally enable `Transcript only`
 - Click `Download`
 - The file is saved into a local `downloads/` folder next to the app
 
@@ -14,6 +15,8 @@ A small Streamlit app for downloading YouTube videos or extracting audio as MP3.
 
 - Python 3.10+ recommended
 - `ffmpeg` installed and available on your `PATH` if you want MP3 downloads
+- `ffmpeg` installed and available on your `PATH` for transcript generation
+- `openai-whisper` for local speech-to-text transcript generation
 
 ## Install
 
@@ -58,6 +61,7 @@ The app uses `yt-dlp` behind the scenes.
 - For video formats, `best` tries to fetch the best available video + audio stream combination.
 - `worst` requests the lowest-quality available format.
 - For `mp3`, the app downloads the best audio stream and converts it to MP3 using `ffmpeg`.
+- For `Transcript only`, the app downloads the best audio stream, then runs local speech-to-text with Whisper and saves a `.txt` transcript.
 
 The download logic lives in [`services/yt_service.py`](./services/yt_service.py), and the UI lives in [`yt_downloader_app.py`](./yt_downloader_app.py).
 
@@ -66,6 +70,7 @@ The download logic lives in [`services/yt_service.py`](./services/yt_service.py)
 - No login or API key is required for the app itself.
 - Some YouTube links may fail depending on the video, region, or site changes.
 - If MP3 conversion fails, check that `ffmpeg` is installed and available from the command line.
+- If transcript generation fails, check that `ffmpeg` is installed and that `openai-whisper` and its dependencies are installed correctly.
 - Downloaded files are written to `downloads/`, which you can safely delete later if you want to clean up space.
 
 ## Project Files
