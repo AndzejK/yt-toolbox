@@ -1,9 +1,31 @@
+from pathlib import Path
+import os
+import sys
+
 import streamlit as st
 from services.yt_service import download_transcript, download_video
 
 st.set_page_config(page_title="YouTube Downloader", page_icon="📺")
 
 st.title("📺 YouTube Video Downloader")
+
+DOWNLOADS_DIR = Path(__file__).resolve().parent / "downloads"
+
+
+def open_downloads_folder() -> None:
+    DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+
+    if os.name == "nt":
+        os.startfile(DOWNLOADS_DIR)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        import subprocess
+
+        subprocess.Popen(["open", str(DOWNLOADS_DIR)])
+    else:
+        import subprocess
+
+        subprocess.Popen(["xdg-open", str(DOWNLOADS_DIR)])
+
 
 url = st.text_input("Paste YouTube URL:")
 
@@ -17,12 +39,18 @@ transcript_only = st.checkbox("Transcript only", value=False)
 if transcript_only:
     st.caption("This will download the audio and generate a local transcript with speech-to-text.")
 
+skip_sponsor_segments = st.checkbox(
+    "Skip sponsor segments",
+    value=True,
+    help="Uses yt-dlp SponsorBlock removal to skip segments tagged as sponsor.",
+)
+
 if st.button("Download"):
     if url:
         with st.spinner("Downloading..."):
             try:
                 if transcript_only:
-                    result = download_transcript(url)
+                    result = download_transcript(url, skip_sponsors=skip_sponsor_segments)
                     st.success(f"Transcript created for: {result['title']}")
                     st.write(f"Saved transcript to: `{result['transcript_path']}`")
                     if result["transcript"]:
@@ -30,9 +58,16 @@ if st.button("Download"):
                     else:
                         st.info("The transcript was empty.")
                 else:
-                    title = download_video(url, quality=quality, format=fmt)
+                    title = download_video(url, quality=quality, format=fmt, skip_sponsors=skip_sponsor_segments)
                     st.success(f"Successfully downloaded: {title}")
             except Exception as e:
                 st.error(f"Error: {e}")
     else:
         st.warning("Please enter a URL.")
+
+if st.button("Open Downloads Folder"):
+    try:
+        open_downloads_folder()
+        st.success(f"Opened: {DOWNLOADS_DIR}")
+    except Exception as e:
+        st.error(f"Error: {e}")

@@ -18,6 +18,25 @@ A small Streamlit app for downloading YouTube videos, extracting audio as MP3, o
 - `ffmpeg` installed and available on your `PATH` for transcript generation
 - `openai-whisper` for local speech-to-text transcript generation
 
+## FFmpeg Requirement
+
+FFmpeg is required for merging video and audio formats.
+FFmpeg is an OS-level dependency, not a Python package, so it should not be added to requirements.txt. It must be installed separately on the operating system.
+
+On Windows:
+
+```powershell
+winget install Gyan.FFmpeg
+```
+
+After installation, restart the terminal and verify:
+
+```powershell
+ffmpeg -version
+```
+
+Python packages should be listed in requirements.txt, while FFmpeg must be installed and available on the system PATH.
+
 ## Install
 
 ### Windows

@@ -12,6 +12,9 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
+YOUTUBE_PLAYER_CLIENTS = ["android", "mweb", "web"]
+YOUTUBE_IMPERSONATE_TARGET = "chrome"
+YOUTUBE_HTTP_CHUNK_SIZE = 10 * 1024 * 1024
 
 
 def _ensure_output_dir(output_path: str) -> Path:
@@ -20,13 +23,69 @@ def _ensure_output_dir(output_path: str) -> Path:
     return path
 
 
-def _base_ydl_opts(output_path: Path) -> dict:
-    return {
+def _base_ydl_opts(output_path: Path, skip_sponsors: bool = False) -> dict:
+    opts = {
         "outtmpl": str(output_path / "%(title)s.%(ext)s"),
         "user_agent": USER_AGENT,
+        "http_headers": {"User-Agent": USER_AGENT},
         "remote_components": ["ejs:github"],
         "noplaylist": True,
+        "http_chunk_size": YOUTUBE_HTTP_CHUNK_SIZE,
     }
+    if skip_sponsors:
+        # yt-dlp's SponsorBlock "default" behavior removes all supported
+        # categories except filler. A single "sponsor" category is often too
+        # narrow for videos that tag promotional reads as selfpromo, intro, or
+        # interaction instead of sponsor.
+        opts["sponsorblock_remove"] = ["all", "-filler"]
+    return opts
+
+
+def _youtube_compat_opts(player_clients: list[str] | None = None, impersonate: str | None = None) -> dict:
+    opts: dict = {}
+    if player_clients:
+        opts["extractor_args"] = {"youtube": {"player_client": player_clients}}
+    if impersonate:
+        opts["impersonate"] = impersonate
+    return opts
+
+
+def _youtube_impersonation_target() -> str | None:
+    try:
+        import curl_cffi  # noqa: F401
+    except ImportError:
+        return None
+    return YOUTUBE_IMPERSONATE_TARGET
+
+
+def _youtube_download_attempts(base_opts: dict) -> list[tuple[str, dict]]:
+    attempts: list[tuple[str, dict]] = []
+
+    primary = dict(base_opts)
+    primary.update(_youtube_compat_opts(YOUTUBE_PLAYER_CLIENTS, _youtube_impersonation_target()))
+    attempts.append(("android/mweb/web + impersonation", primary))
+
+    fallback = dict(base_opts)
+    fallback.update(_youtube_compat_opts(["web", "android", "mweb"]))
+    attempts.append(("web/android/mweb fallback", fallback))
+
+    last_resort = dict(base_opts)
+    attempts.append(("default yt-dlp settings", last_resort))
+
+    return attempts
+
+
+def _download_with_retries(url: str, attempts: list[tuple[str, dict]]) -> tuple[dict, Path]:
+    errors: list[str] = []
+    for label, ydl_opts in attempts:
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                return info, Path(ydl.prepare_filename(info))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{label}: {exc}")
+
+    raise RuntimeError("Unable to download video data after trying multiple YouTube client settings.\n" + "\n".join(errors))
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -52,14 +111,15 @@ def _format_transcript(result: dict) -> str:
     return str(result.get("text", "")).strip()
 
 
-def download_video(url, output_path="downloads", quality="best", format="mp4"):
+def download_video(url, output_path="downloads", quality="best", format="mp4", skip_sponsors: bool = False):
     output_dir = _ensure_output_dir(output_path)
 
     if format == "mp3":
-        ydl_opts = _base_ydl_opts(output_dir)
+        ydl_opts = _base_ydl_opts(output_dir, skip_sponsors=skip_sponsors)
         ydl_opts.update(
             {
-                "format": "bestaudio/best",
+                "format": "bestvideo+bestaudio/best" if skip_sponsors else "bestaudio/best",
+                "merge_output_format": "mkv" if skip_sponsors else None,
                 "postprocessors": [
                     {
                         "key": "FFmpegExtractAudio",
@@ -69,9 +129,11 @@ def download_video(url, output_path="downloads", quality="best", format="mp4"):
                 ],
             }
         )
+        if ydl_opts["merge_output_format"] is None:
+            ydl_opts.pop("merge_output_format")
     else:
         format_string = "bestvideo+bestaudio/best" if quality == "best" else "worst"
-        ydl_opts = _base_ydl_opts(output_dir)
+        ydl_opts = _base_ydl_opts(output_dir, skip_sponsors=skip_sponsors)
         ydl_opts.update(
             {
                 "format": format_string,
@@ -79,12 +141,11 @@ def download_video(url, output_path="downloads", quality="best", format="mp4"):
             }
         )
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        return info.get("title", "Unknown Title")
+    info, _ = _download_with_retries(url, _youtube_download_attempts(ydl_opts))
+    return info.get("title", "Unknown Title")
 
 
-def download_transcript(url, output_path="downloads", model_name="base"):
+def download_transcript(url, output_path="downloads", model_name="base", skip_sponsors: bool = False):
     output_dir = _ensure_output_dir(output_path)
 
     if shutil.which("ffmpeg") is None:
@@ -100,12 +161,10 @@ def download_transcript(url, output_path="downloads", model_name="base"):
         ) from exc
 
     with tempfile.TemporaryDirectory(dir=output_dir) as temp_dir:
-        ydl_opts = _base_ydl_opts(Path(temp_dir))
+        ydl_opts = _base_ydl_opts(Path(temp_dir), skip_sponsors=skip_sponsors)
         ydl_opts.update({"format": "bestaudio/best"})
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            audio_path = Path(ydl.prepare_filename(info))
+        info, audio_path = _download_with_retries(url, _youtube_download_attempts(ydl_opts))
 
         if not audio_path.exists():
             raise RuntimeError("Audio download failed before transcription could start.")
